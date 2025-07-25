@@ -30,7 +30,6 @@ capture_config = picam2.create_still_configuration(
     raw=None,
     colour_space=libcamera.ColorSpace.Raw(),
     buffer_count=6,
-    controls={"AfMode": libcamera.controls.AfModeEnum.Continuous},
     queue=True
 )
 picam2.configure(capture_config)
@@ -38,8 +37,8 @@ picam2.start()
 
 # Configure interpreter
 image_buffer = Image.new("RGB", (width, height))
-labels = read_label_file(str(script_dir / "../model/mobilenet_coco/coco_labels.txt"))
-interpreter = make_interpreter(str(script_dir / "../model/mobilenet_coco/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite"))
+labels = read_label_file(str(script_dir / "./model/mobilenet_coco/coco_labels.txt"))
+interpreter = make_interpreter(str(script_dir / "./model/mobilenet_coco/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite"))
 interpreter.allocate_tensors()
 
 detected_objs = []

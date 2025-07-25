@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import math
+from config import DANGER_THRESHOLDS
 
 # =============================================================================
 # 하이퍼파라미터 설정 (안경 삽입형 카메라 기준)
@@ -56,13 +57,16 @@ class DistanceEstimator:
         return corrected_m * 1000
 
     def estimate_from_bbox(self, bbox):
-        _, _, _, y2 = bbox
+        _, _, _, y2, class_id, *_ = bbox
         dist_mm = self.estimate_from_pixel(y2)
+
+        threshold = DANGER_THRESHOLDS.get(class_id, DANGER_THRESHOLDS['default'])
         return {
             'distance_mm': dist_mm,
             'distance_m': dist_mm / 1000,
-            'is_safe': dist_mm > SAFE_DISTANCE_MM
+            'is_safe': dist_mm > threshold
         }
+
 
 def enhance_image(image):
     h, w = image.shape[:2]

@@ -1,13 +1,13 @@
-from capture import Capture, cap
+from capture import Capture
 from deep_learning import PersonDetector
 from img_processing import enhance_image, DistanceEstimator
 from risk import RiskClassifier
 from notifier import Notifier
-
+from config import MODEL_PATH
 import cv2
 def main():
     # 모델 및 거리 추정기 초기화
-    detector = PersonDetector(model_path="yolov5n.pt", conf=0.3)
+    detector = PersonDetector(model_path=MODEL_PATH, conf=0.4)
     estimator = DistanceEstimator()
     classifier = RiskClassifier()
     notifier = Notifier()
@@ -37,7 +37,8 @@ def main():
                 distances.append(-1)
 
         # 시각화
-        for i, (x1, y1, x2, y2) in enumerate(persons):
+        for i, (x1, y1, x2, y2, class_id, class_name) in enumerate(persons):
+
             d_m = distances[i]
             color = (0, 255, 0)  # 기본: 초록
 
@@ -47,11 +48,11 @@ def main():
                 color = (0, 255, 255)  # 주의: 노랑
 
             cv2.rectangle(enhanced, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(enhanced, f"{d_m:.2f}m", (x1, y2 + 20),
+            cv2.putText(enhanced, f"{class_name} {d_m:.2f}m", (x1, y2 + 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
         # 디스플레이
-        disp = cv2.resize(enhanced, (562, 1000), interpolation=cv2.INTER_AREA)
+        disp = cv2.resize(enhanced, (640, 320), interpolation=cv2.INTER_AREA)
         cv2.imshow("YOLOv5 Detection", disp)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
