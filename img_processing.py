@@ -8,8 +8,8 @@ from config import DANGER_THRESHOLDS
 # =============================================================================
 CAMERA_HEIGHT = 1700      # 카메라 높이 (mm)
 CAMERA_ANGLE = 25         # 하향 각도 (도)
-CAMERA_FOV = 60           # 수직 화각 (도)
-FRAME_HEIGHT = 480        # 이미지 높이 (픽셀)
+CAMERA_FOV = 72.4           # 수직 화각 (도)
+FRAME_HEIGHT = 640       # 이미지 높이 (픽셀)
 SAFE_DISTANCE_MM = 2000   # 안전 거리 (mm)
 DEBUG = False             # 디버깅 출력 여부
 
@@ -30,9 +30,13 @@ class DistanceEstimator:
 
         bottom_y = self.image_height
         bottom_angle = center_angle - (self.fov / 2)
+        if bottom_angle <= 1 :
+            bottom_angle = 1
         bottom_dist = self.height * math.tan(math.radians(bottom_angle))
-
-        slope = (bottom_dist - center_dist) / (bottom_y - center_y)
+        try :
+            slope = (bottom_dist - center_dist) / (bottom_y - center_y)
+        except ZeroDivisionError:
+            slope = 0.001
         intercept = center_dist - slope * center_y
 
         y_coords = np.linspace(0, self.image_height, self.image_height + 1)
@@ -45,16 +49,16 @@ class DistanceEstimator:
             'distances': distances
         }
 
-    def _apply_correction(self, raw_m):
-        return raw_m * 0.88
+    def _apply_correction(self, raw_mm):
+        return raw_mm * 0.88
 
     def estimate_from_pixel(self, y_pixel):
         y = max(0, min(y_pixel, self.image_height))
         slope = self.mapping['slope']
         intercept = self.mapping['intercept']
         raw_mm = slope * y + intercept
-        corrected_m = self._apply_correction(raw_mm / 1000)
-        return corrected_m * 1000
+        corrected_mm = self._apply_correction(raw_mm)
+        return corrected_mm
 
     def estimate_from_bbox(self, bbox):
         _, _, _, y2, class_id, *_ = bbox
@@ -69,12 +73,7 @@ class DistanceEstimator:
 
 
 def enhance_image(image):
-    h, w = image.shape[:2]
-    K = np.array([[w, 0, w / 2], [0, w, h / 2], [0, 0, 1]], dtype=np.float32)
-    D = np.array([-0.2, 0.08, 0, 0], dtype=np.float32)
-    new_K, _ = cv2.getOptimalNewCameraMatrix(K, D, (w, h), 1, (w, h))
-    undistorted = cv2.undistort(image, K, D, None, new_K)
-
+    undistorted = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
     gamma = 2.0
     table = np.array([((i / 255.0) ** (1.0 / gamma)) * 255 for i in range(256)]).astype("uint8")
     bright = cv2.LUT(undistorted, table)

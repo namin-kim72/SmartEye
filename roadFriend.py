@@ -5,7 +5,7 @@ from risk import RiskClassifier
 from notifier import Notifier
 from config import MODEL_PATH
 import cv2
-def main():
+def RoadFriend():
     # 모델 및 거리 추정기 초기화
     detector = PersonDetector(model_path=MODEL_PATH, conf=0.4)
     estimator = DistanceEstimator()
@@ -62,4 +62,4 @@ def main():
     cap.release()
 
 if __name__ == '__main__':
-    main()
+    RoadFriend()
