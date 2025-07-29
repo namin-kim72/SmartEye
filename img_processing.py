@@ -7,7 +7,7 @@ from config import DANGER_THRESHOLDS
 # 하이퍼파라미터 설정 (안경 삽입형 카메라 기준)
 # =============================================================================
 CAMERA_HEIGHT = 1700      # 카메라 높이 (mm)
-CAMERA_ANGLE = 25         # 하향 각도 (도)
+CAMERA_ANGLE = 0         # 하향 각도 (도)
 CAMERA_FOV = 72.4           # 수직 화각 (도)
 FRAME_HEIGHT = 640       # 이미지 높이 (픽셀)
 SAFE_DISTANCE_MM = 2000   # 안전 거리 (mm)
