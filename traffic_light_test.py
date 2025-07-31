@@ -1,5 +1,5 @@
 import cv2
-from deep_learning import PersonDetector # 모델
+from deep_L_test import PersonDetector # 모델
 from img_processing import enhance_image  # 전처리 함수
 from config import MODEL_PATH
 import numpy as np
