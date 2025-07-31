@@ -74,6 +74,7 @@ class DistanceEstimator:
 
 def enhance_image(image):
     undistorted = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    """
     gamma = 2.0
     table = np.array([((i / 255.0) ** (1.0 / gamma)) * 255 for i in range(256)]).astype("uint8")
     bright = cv2.LUT(undistorted, table)
@@ -83,11 +84,12 @@ def enhance_image(image):
     y_eq = cv2.equalizeHist(y)
     merged = cv2.merge([y_eq, cr, cb])
     return cv2.cvtColor(merged, cv2.COLOR_YCrCb2BGR)
+    """
 
 def estimate_distances(bboxes):
     estimator = DistanceEstimator()
     distances = []
-    for bbox in bboxes:
+    for bbox in bboxes[:4]:
         try:
             result = estimator.estimate_from_bbox(bbox)
             dist_m = result['distance_m']
