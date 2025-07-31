@@ -96,3 +96,44 @@ def estimate_distances(bboxes):
             print(f"거리 계산 오류 - bbox: {bbox}, 에러: {e}")
             distances.append(1.0)
     return distances
+
+def detect_traffic_light_color(image, bbox):
+    """
+    신호등 색상 감지 함수 (ROI → HSV 변환 후 분석)
+    입력: BGR 이미지와 bbox(x1, y1, x2, y2, class_id, class_name)
+    출력: "RED", "GREEN", "UNKNOWN"
+    """
+    x1, y1, x2, y2, class_id, *_ = bbox
+    roi = image[y1:y2, x1:x2]
+
+    if roi.size == 0:
+        return "UNKNOWN"
+
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+
+    # 빨간불 HSV 범위 (두 개)
+    lower_red1 = np.array([0, 100, 100])
+    upper_red1 = np.array([10, 255, 255])
+    lower_red2 = np.array([160, 100, 100])
+    upper_red2 = np.array([180, 255, 255])
+
+    # 초록불 HSV 범위 (확장된 범위)
+    lower_green = np.array([40, 50, 50])
+    upper_green = np.array([90, 255, 255])
+
+    red_mask = cv2.inRange(hsv, lower_red1, upper_red1) | cv2.inRange(hsv, lower_red2, upper_red2)
+    green_mask = cv2.inRange(hsv, lower_green, upper_green)
+
+    red_pixels = cv2.countNonZero(red_mask)
+    green_pixels = cv2.countNonZero(green_mask)
+
+    if DEBUG:
+        print(f"[신호등 HSV] red={red_pixels}, green={green_pixels}")
+
+    if red_pixels > green_pixels and red_pixels > 100:
+        return "RED"
+    elif green_pixels > red_pixels and green_pixels > 50:
+        return "GREEN"
+    else:
+        return "UNKNOWN"
+
