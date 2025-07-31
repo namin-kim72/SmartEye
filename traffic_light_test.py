@@ -42,7 +42,7 @@ def detect_traffic_light_color(image, bbox):
 # === 메인 테스트 함수 ===
 def main():
     cap = cv2.VideoCapture("traffic_light.mp4")
-    detector = PersonDetector(model_path=MODEL_PATH, conf=0.4)
+    detector = PersonDetector(model_path="yolov8n.pt", conf=0.4)
 
     while cap.isOpened():
         ret, frame = cap.read()
