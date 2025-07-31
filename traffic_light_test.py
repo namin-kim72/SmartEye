@@ -20,9 +20,9 @@ def detect_traffic_light_color(image, bbox):
     lower_red2 = np.array([160, 100, 100])
     upper_red2 = np.array([180, 255, 255])
 
-    # 파란불(청록색) 범위
-    lower_green = np.array([90, 100, 100])
-    upper_green = np.array([140, 255, 255])
+    # 파란불(청록색) 범위S
+    lower_green = np.array([40, 50, 50])
+    upper_green = np.array([90, 255, 255])
 
     red_mask = cv2.inRange(hsv, lower_red1, upper_red1) | cv2.inRange(hsv, lower_red2, upper_red2)
     green_mask = cv2.inRange(hsv, lower_green, upper_green)
@@ -30,9 +30,11 @@ def detect_traffic_light_color(image, bbox):
     red_pixels = cv2.countNonZero(red_mask)
     green_pixels = cv2.countNonZero(green_mask)
 
+    print(f"[디버깅] red={red_pixels}, green={green_pixels}")
+
     if red_pixels > green_pixels and red_pixels > 100:
         return "RED"
-    elif green_pixels > red_pixels and green_pixels > 100:
+    elif green_pixels > red_pixels and green_pixels > 50:
         return "GREEN"
     else:
         return "UNKNOWN"
@@ -47,24 +49,24 @@ def main():
         if not ret:
             break
 
-        enhanced = enhance_image(frame)  # 영상 전처리
-        detections = detector.detect(enhanced)
+        
+        detections = detector.detect(frame)
 
         for bbox in detections:
             x1, y1, x2, y2, class_id, class_name = bbox
 
             # 신호등(class_id=9)만 분석
             if class_id == 9:
-                color = detect_traffic_light_color(enhanced, (x1, y1, x2, y2))
+                color = detect_traffic_light_color(frame, (x1, y1, x2, y2))
                 print(f"[신호등 감지] 색상: {color}")
 
                 # 시각화
                 color_draw = (0, 255, 0) if color == "GREEN" else (0, 0, 255)
-                cv2.rectangle(enhanced, (x1, y1), (x2, y2), color_draw, 2)
-                cv2.putText(enhanced, f"{color}", (x1, y1 - 10),
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color_draw, 2)
+                cv2.putText(frame, f"{color}", (x1, y1 - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_draw, 2)
 
-        cv2.imshow("Traffic Light Detection", cv2.resize(enhanced, (640, 360)))
+        cv2.imshow("Traffic Light Detection", cv2.resize(frame, (640, 360)))
 
         if cv2.waitKey(30) & 0xFF == ord('q'):
             break
