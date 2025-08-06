@@ -1,5 +1,5 @@
 import cv2
-from person_detector import PersonDetector
+from deep_learning import PersonDetector
 import matplotlib.pyplot as plt
 
 def visualize_detection(image_path):
@@ -9,7 +9,7 @@ def visualize_detection(image_path):
     # 이미지 읽기
     image = cv2.imread(image_path)
     if image is None:
-        print("❌ 이미지 불러오기 실패:", image_path)
+        print("이미지 불러오기 실패:", image_path)
         return
 
     # 탐지 수행
@@ -33,5 +33,5 @@ def visualize_detection(image_path):
 
 if __name__ == "__main__":
     # 테스트 이미지 경로 입력
-    image_path = "test.jpg"
+    image_path = "person2.jpg"
     visualize_detection(image_path)
