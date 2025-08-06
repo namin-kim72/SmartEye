@@ -85,6 +85,7 @@ def enhance_image(image):
     merged = cv2.merge([y_eq, cr, cb])
     return cv2.cvtColor(merged, cv2.COLOR_YCrCb2BGR)
     """
+    return undistorted
 
 def estimate_distances(bboxes):
     estimator = DistanceEstimator()
@@ -138,4 +139,5 @@ def detect_traffic_light_color(image, bbox):
         return "GREEN"
     else:
         return "UNKNOWN"
+
 
