@@ -1,31 +1,37 @@
 import cv2
-from ultralytics import YOLO
+from person_detector import PersonDetector
+import matplotlib.pyplot as plt
 
-class PersonDetector:
-    _detector = None  # 싱글톤 인스턴스 저장 변수
+def visualize_detection(image_path):
+    # 모델 초기화
+    detector = PersonDetector()
 
-    def __new__(cls, *args, **kwargs):
-        if cls._detector is None:
-            cls._detector = super(PersonDetector, cls).__new__(cls)
-        return cls._detector
-        
-    def __init__(self, model_path="yolov8n.pt", conf=0.3):
-        if not hasattr(self, "model"):
-            self.model = YOLO(model_path)
-            self.conf = conf
+    # 이미지 읽기
+    image = cv2.imread(image_path)
+    if image is None:
+        print("❌ 이미지 불러오기 실패:", image_path)
+        return
 
-    def detect(self, image):
-        """
-        BGR 이미지를 받아서 신호등(class_id=9)만 탐지하고
-        (x1, y1, x2, y2, class_id, class_name) 형태의 바운딩 박스 리스트 반환
-        """
-        results = self.model(image, conf=self.conf, classes=[9])
-        boxes = []
+    # 탐지 수행
+    boxes = detector.detect(image)
 
-        if results and results[0].boxes is not None:
-            for box_obj in results[0].boxes:
-                x1, y1, x2, y2 = map(int, box_obj.xyxy[0])
-                class_id = int(box_obj.cls)
-                class_name = self.model.names[class_id]
-                boxes.append((x1, y1, x2, y2, class_id, class_name))
-        return boxes
+    # 박스 시각화
+    for box in boxes:
+        x1, y1, x2, y2, class_id, class_name = box
+        color = (0, 255, 0)  # 초록 박스
+        cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(image, f"{class_name}", (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
+    # 결과 출력 (matplotlib 사용 시 RGB로 변환)
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    plt.imshow(image_rgb)
+    plt.axis('off')
+    plt.title("Detection Result")
+    plt.show()
+
+
+if __name__ == "__main__":
+    # 테스트 이미지 경로 입력
+    image_path = "test.jpg"
+    visualize_detection(image_path)
