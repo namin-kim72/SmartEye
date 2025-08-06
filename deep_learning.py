@@ -20,7 +20,9 @@ class PersonDetector:
         common.set_input(self.interpreter, image_resized)
     
         self.interpreter.invoke()
-        objs = detect.get_objects(self.interpreter, self.threshold)
+        _, scale = common.set_resized_input(self.interpreter, image.size, lambda size: image.resize(size, Image.ANTIALIAS))
+        objs = detect.get_objects(self.interpreter, self.threshold, scale)
+
     
         boxes = []
         for obj in objs:
