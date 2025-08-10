@@ -1,106 +1,115 @@
 import cv2
-import numpy as np
-from deep_learning import PersonDetector  # (x1,y1,x2,y2,class_id,class_name) 반환 가정
+from deep_learning import PersonDetector
 from config import MODEL_PATH
+import numpy as np
 
-# ------------------------------
-# 신호등 색상 감지
-# ------------------------------
+# === 신호등 색상 감지 함수 ===
 def detect_traffic_light_color(image, bbox, debug=False):
+    import cv2, numpy as np
+
     x1, y1, x2, y2 = bbox
     h, w = image.shape[:2]
 
-    # 경계 보정 + 약간 패딩
-    pad = 4
-    x1 = max(0, x1 - pad); y1 = max(0, y1 - pad)
-    x2 = min(w - 1, x2 + pad); y2 = min(h - 1, y2 + pad)
+    # ROI 살짝 축소(테두리/배경 제거)
+    m = 0.12
+    x1 = max(0, int(x1 + (x2-x1)*m))
+    x2 = min(w-1, int(x2 - (x2-x1)*m))
+    y1 = max(0, int(y1 + (y2-y1)*m))
+    y2 = min(h-1, int(y2 - (y2-y1)*m))
 
     roi = image[y1:y2, x1:x2]
-    if roi.size == 0 or (y2 - y1) < 6 or (x2 - x1) < 6:
+    if roi.size == 0:
         return "UNKNOWN"
 
-    # 전처리: 가우시안 블러 + 밝기 정규화
-    roi_blur = cv2.GaussianBlur(roi, (5, 5), 0)
+    # 부드럽게 + HSV
+    roi_blur = cv2.GaussianBlur(roi, (5,5), 0)
     hsv = cv2.cvtColor(roi_blur, cv2.COLOR_BGR2HSV)
-    hch, sch, vch = cv2.split(hsv)
-    vch = cv2.equalizeHist(vch)
-    hsv = cv2.merge([hch, sch, vch])
+    H, S, V = cv2.split(hsv)
 
-    # HSV 범위 (조금 넓게)
-    red1_lo, red1_hi = np.array([0,   80, 80]),  np.array([12, 255, 255])
-    red2_lo, red2_hi = np.array([165, 80, 80]),  np.array([180,255, 255])
-    green_lo, green_hi = np.array([40, 50, 50]), np.array([95, 255, 255])
+    # 불빛만 통과(밝고 채도 높은 픽셀)
+    s_mask = cv2.inRange(S, 100, 255)
+    v_mask = cv2.inRange(V, 130, 255)
+    sv = cv2.bitwise_and(s_mask, v_mask)
 
-    red_mask = cv2.inRange(hsv, red1_lo, red1_hi) | cv2.inRange(hsv, red2_lo, red2_hi)
-    green_mask = cv2.inRange(hsv, green_lo, green_hi)
+    # 색 마스크 (조금 보수적으로)
+    red1 = cv2.inRange(hsv, (0, 80, 80),   (12, 255, 255))
+    red2 = cv2.inRange(hsv, (165,80, 80),  (180,255,255))
+    red  = cv2.bitwise_or(red1, red2)
 
-    # 노이즈 억제
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_OPEN, k)
-    red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_DILATE, k, iterations=1)
-    green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_OPEN, k)
-    green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_DILATE, k, iterations=1)
+    green = cv2.inRange(hsv, (55, 80, 80), (85, 255,255))
 
-    # 수직 신호등 가정: 상/중/하로 나눠 가장 강한 구역 비교(불빛이 작은 경우 유리)
-    H = roi.shape[0]
-    thirds = [(0, H//3), (H//3, 2*H//3), (2*H//3, H)]
-    red_scores, green_scores = [], []
-    for y_lo, y_hi in thirds:
-        red_scores.append(int(np.count_nonzero(red_mask[y_lo:y_hi, :])))
-        green_scores.append(int(np.count_nonzero(green_mask[y_lo:y_hi, :])))
+    # 불빛 마스크와 AND
+    red   = cv2.bitwise_and(red, sv)
+    green = cv2.bitwise_and(green, sv)
 
-    red_sum = sum(red_scores)
-    green_sum = sum(green_scores)
+    # 노이즈 정리
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3,3))
+    red   = cv2.morphologyEx(red,   cv2.MORPH_OPEN, k)
+    green = cv2.morphologyEx(green, cv2.MORPH_OPEN, k)
+
+    # 상/하 분리
+    Hroi = roi.shape[0]
+    top  = slice(0, Hroi//2)
+    bot  = slice(Hroi//2, Hroi)
+
+    red_top    = int(np.count_nonzero(red[top, :]))
+    red_bot    = int(np.count_nonzero(red[bot, :]))
+    green_top  = int(np.count_nonzero(green[top, :]))
+    green_bot  = int(np.count_nonzero(green[bot, :]))
+    red_sum    = red_top + red_bot
+    green_sum  = green_top + green_bot
+
+    # ROI 크기에 따른 적응형 임계값
+    area = roi.shape[0] * roi.shape[1]
+    PIX_MIN  = max(40, int(area * 0.002))   # 아주 작은 신호등 대비
+    PIX_MIN_G = max(35, int(area * 0.0015))
 
     if debug:
-        print(f"[DEBUG] red_sum={red_sum}, green_sum={green_sum}, red_parts={red_scores}, green_parts={green_scores}")
+        print(f"[DBG] red_top={red_top}, red_bot={red_bot}, green_top={green_top}, green_bot={green_bot}, "
+              f"red_sum={red_sum}, green_sum={green_sum}, thrR={PIX_MIN}, thrG={PIX_MIN_G}")
 
-    # 임계치(작은 신호등 대비 완화)
-    RED_MIN, GREEN_MIN = 60, 40
-
-    # 상단 램프(빨강), 하단 램프(초록) 가중치 약간 부여
-    red_weight = red_sum + red_scores[0] * 0.25
-    green_weight = green_sum + green_scores[-1] * 0.25
-
-    if red_weight > green_weight and red_sum > RED_MIN:
-        return "RED"
-    elif green_weight >= red_weight and green_sum > GREEN_MIN:
+    # ---------- 판정 규칙(보행 신호 특화) ----------
+    # 1) 초록(하단) 우선 규칙
+    if green_bot > PIX_MIN_G and green_bot > red_top * 0.7 and green_sum > red_sum * 0.5:
         return "GREEN"
-    else:
-        return "UNKNOWN"
 
-# ------------------------------
-# 메인
-# ------------------------------
+    # 2) 빨강: 상단이 충분히 강하거나(보행자 빨강 사람),
+    #    하단에서도 빨강(카운트 숫자)이 많고 초록이 거의 없을 때도 빨강 처리
+    if (red_top > PIX_MIN) or (red_bot > PIX_MIN and green_sum < PIX_MIN_G):
+        return "RED"
+
+    # 3) 전체 빨강이 초록보다 확실히 우세
+    if red_sum > green_sum * 1.8 and red_sum > PIX_MIN:
+        return "RED"
+
+    # 4) 전체 초록이 우세
+    if green_sum > red_sum * 1.5 and green_sum > PIX_MIN_G:
+        return "GREEN"
+
+    return "UNKNOWN"
+
+# === 메인 테스트 ===
 def main():
-    cap = cv2.VideoCapture("traffic_light.mp4")  # 파일 테스트. 웹캠이면 0
-    detector = PersonDetector(model_path=MODEL_PATH, conf=0.35)
+    image_path = "images/traffic_4.png"  # 테스트 이미지 경로
+    image = cv2.imread(image_path)
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+    detector = PersonDetector(model_path=MODEL_PATH, conf=0.4)
+    detections = detector.detect(image)
 
-        # 신호등만 감지하려면 deep_learning.detect 내부에서 classes=[9] 처리 or 아래처럼 필터링
-        detections = detector.detect(frame)
+    for bbox in detections:
+        x1, y1, x2, y2, class_id, class_name = bbox
+        if class_id == 9:  # traffic light
+            color = detect_traffic_light_color(image, (x1, y1, x2, y2))
+            print(f"[신호등 감지] 색상: {color}")
 
-        for bbox in detections:
-            x1, y1, x2, y2, class_id, class_name = bbox
+            draw_color = (0, 255, 0) if color == "GREEN" else (0, 0, 255)
+            cv2.rectangle(image, (x1, y1), (x2, y2), draw_color, 2)
+            cv2.putText(image, f"{color}", (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, draw_color, 2)
 
-            if class_id == 9:  # traffic light (COCO)
-                color = detect_traffic_light_color(frame, (x1, y1, x2, y2), debug=False)
-
-                draw = (0, 255, 0) if color == "GREEN" else ((0, 0, 255) if color == "RED" else (128, 128, 128))
-                cv2.rectangle(frame, (x1, y1), (x2, y2), draw, 2)
-                cv2.putText(frame, f"{color}", (x1, max(0, y1 - 8)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, draw, 2)
-
-        cv2.imshow("Traffic Light Detection", cv2.resize(frame, (640, 360)))
-        if cv2.waitKey(30) & 0xFF == ord('q'):
-            break
-
-    cap.release()
+    cv2.imshow("Traffic Light Test", cv2.resize(image, (640, 360)))
+    cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
