@@ -104,7 +104,7 @@ def estimate_distances(bboxes):
 def detect_traffic_light_color(image, bbox, debug=False):
     import cv2, numpy as np
 
-    x1, y1, x2, y2 = bbox
+    x1, y1, x2, y2, class_id, *_ = bbox
     h, w = image.shape[:2]
 
     # ROI 살짝 축소(테두리/배경 제거)
@@ -184,6 +184,7 @@ def detect_traffic_light_color(image, bbox, debug=False):
         return "GREEN"
 
     return "UNKNOWN"
+
 
 
 
