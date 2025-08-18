@@ -5,85 +5,66 @@ import math
 from Common.config import CAMERA_ROTATE_CCW_90
 
 # =============================================================================
-# 거리 추정 (카메라 매개변수는 필요 시 수정)
+# 거리 추정 기본 파라미터
 # =============================================================================
-CAMERA_HEIGHT_MM = 1700     # 카메라 높이(mm)
-CAMERA_TILT_DEG = 0         # 하향 각도(도)
-CAMERA_VFOV_DEG = 72.4      # 수직 화각(도)
-DEFAULT_FRAME_HEIGHT = 640  # 기본 프레임 높이(px)
+CAMERA_HEIGHT_MM = 1700     # 카메라 높이 (mm)
+CAMERA_TILT_DEG = 0         # 카메라 기울기 (도)
+CAMERA_VFOV_DEG = 72.4      # 수직 화각 (도)
+DEFAULT_FRAME_HEIGHT = 640  # 기본 프레임 높이 (px)
 DEBUG = False
 
 class DistanceEstimator:
     """
-    픽셀 y좌표(특히 bbox 하단 y) -> 지면까지의 대략적 거리(mm) 추정기.
-    안전/위험 판단은 공용이 아닌 '보행모드 risk 모듈'에서 한다.
+    픽셀 y좌표 -> 지면까지 거리 추정
+    - mm, m 단위 모두 지원
+    - bbox 하단(y2) 기준
     """
     def __init__(self, height_mm=CAMERA_HEIGHT_MM, tilt_deg=CAMERA_TILT_DEG,
                  vfov_deg=CAMERA_VFOV_DEG, image_height=DEFAULT_FRAME_HEIGHT, debug=DEBUG):
-        self.height = height_mm
-        self.tilt = tilt_deg
-        self.vfov = vfov_deg
-        self.image_height = image_height
-        self.debug = debug
-        self.mapping = self._build_mapping()
+        self.height_mm    = float(height_mm)
+        self.tilt_deg     = float(tilt_deg)
+        self.vfov_deg     = float(vfov_deg)
+        self.image_height = int(image_height)
+        self.debug        = debug
+        self.mapping      = self._build_mapping(self.image_height)
 
-    def _build_mapping(self):
-        center_y = self.image_height // 2
-        center_angle = 90 - self.tilt
-        center_dist = self.height * math.tan(math.radians(center_angle))
+    def _build_mapping(self, H: int):
+        cy = H / 2.0
+        ys = np.linspace(0, H, H + 1)
+        alpha = ((ys - cy) / (H / 2.0)) * (self.vfov_deg / 2.0)
+        phi = self.tilt_deg + alpha
+        phi = np.clip(phi, 0.5, 89.5)
+        d_mm = self.height_mm / np.tan(np.deg2rad(phi))
+        return {"H": H, "cy": cy, "d_mm": d_mm}
 
-        bottom_y = self.image_height
-        bottom_angle = center_angle - (self.vfov / 2)
-        if bottom_angle <= 1:
-            bottom_angle = 1
-        bottom_dist = self.height * math.tan(math.radians(bottom_angle))
+    def _ensure_height(self, image_height: int):
+        if image_height != self.mapping["H"]:
+            self.mapping = self._build_mapping(image_height)
 
-        slope = (bottom_dist - center_dist) / max(1, (bottom_y - center_y))
-        intercept = center_dist - slope * center_y
+    def estimate_from_pixel_mm(self, y_pixel: int, *, image_height: int | None = None) -> float:
+        if image_height is not None:
+            self._ensure_height(image_height)
+        H = self.mapping["H"]
+        y = int(np.clip(y_pixel, 0, H))
+        d_mm = float(self.mapping["d_mm"][y])
+        d_mm *= 0.88  # 보정계수
+        return d_mm
 
-        y_coords = np.linspace(0, self.image_height, self.image_height + 1)
-        distances = slope * y_coords + intercept
+    def estimate_from_pixel_m(self, y_pixel: int, *, image_height: int | None = None) -> float:
+        return self.estimate_from_pixel_mm(y_pixel, image_height=image_height) / 1000.0
 
-        return {
-            "slope": slope,
-            "intercept": intercept,
-            "center_y": center_y,
-            "distances": distances,
-        }
-
-    def _apply_correction(self, raw_mm):
-        # 보정계수(경험적): 피팅 후 필요 시 조정
-        return raw_mm * 0.88
-
-    def estimate_from_pixel(self, y_pixel):
-        y = max(0, min(int(y_pixel), self.image_height))
-        raw_mm = self.mapping["slope"] * y + self.mapping["intercept"]
-        return self._apply_correction(raw_mm)
-
-    def estimate_from_bbox(self, bbox, *, image_height=None):
-        """
-        bbox = (x1, y1, x2, y2, class_id, ...)
-        공용 단계에서는 거리만 반환하고, 위험판단은 호출측(보행모드 risk)이 수행.
-        """
-        if image_height and image_height != self.image_height:
-            # 프레임 높이가 다르면 임시 인스턴스 생성해 사용
-            tmp = DistanceEstimator(
-                height_mm=self.height,
-                tilt_deg=self.tilt,
-                vfov_deg=self.vfov,
-                image_height=image_height,
-                debug=self.debug,
-            )
-            return tmp.estimate_from_bbox(bbox)
+    def estimate_from_bbox_mm(self, bbox, *, image_height: int | None = None) -> float:
         _, _, _, y2, *_ = bbox
-        return self.estimate_from_pixel(y2)
+        return self.estimate_from_pixel_mm(y2, image_height=image_height)
 
+    def estimate_from_bbox_m(self, bbox, *, image_height: int | None = None) -> float:
+        return self.estimate_from_bbox_mm(bbox, image_height=image_height) / 1000.0
+
+
+# =============================================================================
+# 영상 전처리
+# =============================================================================
 def enhance_image(image):
-    """
-    가벼운 공용 전처리:
-    - 필요 시 CCW 90° 회전(공용 설정 기반)
-    - 추가 밝기/대비/히스토그램 평활화는 호출처에서 선택
-    """
     out = image
     if CAMERA_ROTATE_CCW_90:
         out = cv2.rotate(out, cv2.ROTATE_90_COUNTERCLOCKWISE)
@@ -100,15 +81,19 @@ def equalize_luma(image_bgr):
     merged = cv2.merge([y_eq, cr, cb])
     return cv2.cvtColor(merged, cv2.COLOR_YCrCb2BGR)
 
+
+# =============================================================================
+# 신호등 색상 감지
+# =============================================================================
 def detect_traffic_light_color(image_bgr, bbox, debug=False):
     """
-    신호등 색상 감지(보행자 신호 특화)
-    bbox = (x1, y1, x2, y2, class_id, ...)
+    보행자 신호등 색상 감지
     반환: "RED" | "GREEN" | "UNKNOWN"
     """
     x1, y1, x2, y2, *_ = bbox
     h, w = image_bgr.shape[:2]
 
+    # ROI 축소
     m = 0.12
     x1 = max(0, int(x1 + (x2 - x1) * m))
     x2 = min(w - 1, int(x2 - (x2 - x1) * m))
@@ -121,50 +106,47 @@ def detect_traffic_light_color(image_bgr, bbox, debug=False):
 
     roi_blur = cv2.GaussianBlur(roi, (5, 5), 0)
     hsv = cv2.cvtColor(roi_blur, cv2.COLOR_BGR2HSV)
-    H, S, V = cv2.split(hsv)
+    Hc, Sc, Vc = cv2.split(hsv)
 
-    s_mask = cv2.inRange(S, 100, 255)
-    v_mask = cv2.inRange(V, 130, 255)
+    # 불빛 특성
+    s_mask = cv2.inRange(Sc, 100, 255)
+    v_mask = cv2.inRange(Vc, 130, 255)
     sv = cv2.bitwise_and(s_mask, v_mask)
 
-    red1 = cv2.inRange(hsv, (0, 80, 80), (12, 255, 255))
+    # 색 마스크
+    red1 = cv2.inRange(hsv, (0,   80, 80), (12, 255, 255))
     red2 = cv2.inRange(hsv, (165, 80, 80), (180, 255, 255))
-    red = cv2.bitwise_or(red1, red2)
+    red  = cv2.bitwise_or(red1, red2)
     green = cv2.inRange(hsv, (55, 80, 80), (85, 255, 255))
 
-    red = cv2.bitwise_and(red, sv)
-    green = cv2.bitwise_and(green, sv)
-
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    red = cv2.morphologyEx(red, cv2.MORPH_OPEN, k)
-    green = cv2.morphologyEx(green, cv2.MORPH_OPEN, k)
+    red   = cv2.morphologyEx(cv2.bitwise_and(red, sv), cv2.MORPH_OPEN, k)
+    green = cv2.morphologyEx(cv2.bitwise_and(green, sv), cv2.MORPH_OPEN, k)
 
+    # 상/하 분리
     Hroi = roi.shape[0]
     top = slice(0, Hroi // 2)
     bot = slice(Hroi // 2, Hroi)
 
-    red_top = int(np.count_nonzero(red[top, :]))
-    red_bot = int(np.count_nonzero(red[bot, :]))
-    green_top = int(np.count_nonzero(green[top, :]))
-    green_bot = int(np.count_nonzero(green[bot, :]))
-    red_sum = red_top + red_bot
-    green_sum = green_top + green_bot
+    red_top    = int(np.count_nonzero(red[top, :]))
+    red_bot    = int(np.count_nonzero(red[bot, :]))
+    green_top  = int(np.count_nonzero(green[top, :]))
+    green_bot  = int(np.count_nonzero(green[bot, :]))
+    red_sum    = red_top + red_bot
+    green_sum  = green_top + green_bot
 
-    area = roi.shape[0] * roi.shape[1]
-    PIX_MIN = max(40, int(area * 0.002))
+    # 임계값
+    area = max(1, roi.shape[0] * roi.shape[1])
+    PIX_MIN_R = max(40, int(area * 0.002))
     PIX_MIN_G = max(35, int(area * 0.0015))
 
     if debug:
-        print(f"[DBG] red_top={red_top}, red_bot={red_bot}, green_top={green_top}, "
-              f"green_bot={green_bot}, red_sum={red_sum}, green_sum={green_sum}, "
-              f"thrR={PIX_MIN}, thrG={PIX_MIN_G}")
+        print(f"[DBG] red_top={red_top}, green_bot={green_bot}, thrR={PIX_MIN_R}, thrG={PIX_MIN_G}")
 
+    # 판정
     if green_bot > PIX_MIN_G and green_bot > red_top * 0.7 and green_sum > red_sum * 0.5:
         return "GREEN"
-    if (red_top > PIX_MIN) or (red_bot > PIX_MIN and green_sum < PIX_MIN_G):
+    if red_top > PIX_MIN_R and red_top > green_bot * 0.7 and red_sum > green_sum * 0.5:
         return "RED"
-    if red_sum > green_sum * 1.8 and red_sum > PIX_MIN:
-        return "RED"
-    if green_sum > red_sum * 1.5 and green_sum > PIX_MIN_G:
-        return "GREEN"
+
     return "UNKNOWN"
