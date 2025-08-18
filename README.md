@@ -3,7 +3,6 @@
 > 보행 안전 · 텍스트 읽기 · 음식 인식 기능을 하나로 통합  
 
 ---
-
 ## 📂 Project Structure
 
 SmartEye/
@@ -22,7 +21,7 @@ SmartEye/
 │
 ├─ ReadMode/ # 읽기 모드 (OCR + Gesture + TTS)
 │ ├─ ReadMode.py
-│ ├─ config.py
+│ └─ config.py
 │
 ├─ WalkingMode/ # 보행 모드 (객체 감지 + 거리 추정 + 위험 알림)
 │ ├─ WalkingMode.py
@@ -35,3 +34,5 @@ SmartEye/
 │ └─ coco_labels.txt
 │
 └─ main.py # 메인 실행기 (모드 선택 메뉴)
+
+
