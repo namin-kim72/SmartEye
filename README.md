@@ -35,7 +35,8 @@ SmartEye/
 │       └─ coco_labels.txt
 │
 └─ main.py                  # 메인 실행기 (모드 선택 메뉴)
-```text
+```
+
 ## 메뉴
 
 === SmartEye 메인 ===
@@ -43,6 +44,7 @@ SmartEye/
   2. 읽기모드 (ReadMode)
   3. 식사모드 (MealMode)
   q. 종료
+
 1: 보행모드
 
 객체 감지 (사람, 차량, 신호등 등)
