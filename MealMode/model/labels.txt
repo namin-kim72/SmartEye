@@ -1,0 +1,6 @@
+rice
+noodle
+meat
+soup
+vegetable
+side-dish
