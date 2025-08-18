@@ -38,12 +38,13 @@ SmartEye/
 ```
 
 ## 메뉴
-
+'''text
 === SmartEye 메인 ===
   1. 보행모드 (WalkingMode)
   2. 읽기모드 (ReadMode)
   3. 식사모드 (MealMode)
   q. 종료
+'''
 
 1: 보행모드
 
