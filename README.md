@@ -35,5 +35,32 @@ SmartEye/
 │       └─ coco_labels.txt
 │
 └─ main.py                  # 메인 실행기 (모드 선택 메뉴)
+```text
+## 메뉴
 
+=== SmartEye 메인 ===
+  1. 보행모드 (WalkingMode)
+  2. 읽기모드 (ReadMode)
+  3. 식사모드 (MealMode)
+  q. 종료
+1: 보행모드
 
+객체 감지 (사람, 차량, 신호등 등)
+
+거리 추정 + 위험 판단
+
+진동/사운드 알림
+
+2: 읽기모드
+
+손 제스처(주먹) → 캡처 트리거
+
+Google Vision OCR로 텍스트 추출
+
+음성(TTS)으로 읽어주기
+
+3: 식사모드
+
+EfficientDet 기반 음식 탐지
+
+라벨 표시 및 FPS 출력
