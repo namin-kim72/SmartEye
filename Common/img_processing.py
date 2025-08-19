@@ -59,7 +59,7 @@ class DistanceEstimator:
         y = max(0, min(int(y_pixel), self.image_height))
         raw_mm = self.mapping["slope"] * y + self.mapping["intercept"]
         corrected_mm = self._apply_correction(raw_mm)
-        return corrected_mm  # ✅ 결과를 m 단위로 반환
+        return corrected_mm  
 
     def estimate_from_bbox(self, bbox, *, image_height=None):
         """
@@ -175,4 +175,5 @@ def detect_traffic_light_color(image_bgr, bbox, debug=False):
     if green_sum > red_sum * 1.5 and green_sum > PIX_MIN_G:
         return "GREEN"
     return "UNKNOWN"
+
 
