@@ -5,7 +5,6 @@ import math, sys, threading, time
 from pathlib import Path
 import cv2, numpy as np
 from PIL import Image, ImageDraw
-
 from pycoral.adapters import common, detect
 from pycoral.utils.dataset import read_label_file
 from pycoral.utils.edgetpu import make_interpreter
@@ -18,7 +17,7 @@ from MealMode.config import (
 )
 
 # --- 공용 캡처 ---
-from Common.capture import Capture
+from Common.frame_bus import FrameBus
 
 # --------------------------------------------------------------------------
 # 모델/라벨 로드
@@ -31,7 +30,6 @@ interpreter.allocate_tensors()
 # --------------------------------------------------------------------------
 # 구역/방향(테스트 스크립트 로직 이식)
 # --------------------------------------------------------------------------
-# 위쪽 3분할(좌전/전방/우전), 아래쪽 2분할(좌/우)
 H_SPLIT   = 0.50      # 수평 분할 위치(화면 높이 비율)
 TOP_L     = 1.0/3.0   # 윗부분 좌/전 경계(가로 비율)
 TOP_R     = 2.0/3.0   # 윗부분 전/우 경계(가로 비율)
@@ -57,10 +55,10 @@ def direction_from_bottom_center(x_bc: float, y_bc: float,
 def draw_guides(draw: ImageDraw.ImageDraw, frame_w:int, frame_h:int):
     x_top_l, x_top_r, x_bot_c, y_h = _zone_boundaries(frame_w, frame_h)
     w, h = frame_w, frame_h
-    draw.line([(0, y_h), (w, y_h)], fill="gray", width=2)             # 수평선
-    draw.line([(x_top_l, 0), (x_top_l, y_h)], fill="gray", width=2)   # 윗부분 좌/전
-    draw.line([(x_top_r, 0), (x_top_r, y_h)], fill="gray", width=2)   # 윗부분 전/우
-    draw.line([(x_bot_c, y_h), (x_bot_c, h)], fill="gray", width=2)   # 아랫부분 좌/우
+    draw.line([(0, y_h), (w, y_h)], fill="gray", width=2)
+    draw.line([(x_top_l, 0), (x_top_l, y_h)], fill="gray", width=2)
+    draw.line([(x_top_r, 0), (x_top_r, y_h)], fill="gray", width=2)
+    draw.line([(x_bot_c, y_h), (x_bot_c, h)], fill="gray", width=2)
 
 # --------------------------------------------------------------------------
 # 중복 제거 유틸
@@ -72,7 +70,7 @@ def is_duplicate(center1, center2, dist_thresh=DEDUP_DISTANCE):
 # 추론 스레드
 # --------------------------------------------------------------------------
 image_buffer = None
-detected_objs = []        # [(obj, bbox), ...]
+detected_objs = []
 inference_latency = sys.float_info.max
 _infer_lock = threading.Lock()
 
@@ -81,8 +79,6 @@ def run_interpreter():
     if image_buffer is None:
         return
     start = time.perf_counter()
-
-    # PIL 이미지 버퍼를 모델 입력 크기에 맞춰 리사이즈
     _, scale = common.set_resized_input(
         interpreter,
         image_buffer.size,
@@ -90,10 +86,7 @@ def run_interpreter():
     )
     interpreter.invoke()
     inference_latency = time.perf_counter() - start
-
     objs = detect.get_objects(interpreter, score_threshold=SCORE_THRESHOLD, image_scale=scale)
-
-    # 같은 클래스에서 너무 가까운 박스(중복) 제거
     dedup_map, filtered = {}, []
     for obj in objs:
         bbox = obj.bbox
@@ -112,43 +105,48 @@ def run_interpreter():
         detected_objs = filtered
 
 # --------------------------------------------------------------------------
-# 메인 루프
+# MealApp (FrameBus 구독형)
 # --------------------------------------------------------------------------
-def main():
-    global image_buffer
-    if SHOW_WINDOW:
-        cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_NORMAL)
+class MealApp:
+    def __init__(self, bus: FrameBus):
+        self.bus = bus
+        self.sub_id = bus.subscribe(queue_size=1)
+        self.running = True
+        self.last_frame_time = time.perf_counter() # <--- last_frame_time 초기화
 
-    inference_thread = threading.Thread(target=run_interpreter)
-    inference_thread.start()
+    def run(self):
+        q = self.bus.get_queue(self.sub_id)
 
-    framerate = 0.0
-    last_frame_time = time.perf_counter()
-    show_guides = False
+        while self.running:
+            try:
+                frame_rgb = q.get(timeout=0.5)
+            except Exception:
+                frame_rgb = None
 
-    try:
-        while True:
-            frame_rgb = Capture()
             if frame_rgb is None:
                 continue
 
-            # PIL.Image로 변환(여기서 그리기 수행)
+            # 프레임 레이트 계산
+            now = time.perf_counter()
+            framerate = 1.0 / max(1e-6, (now - self.last_frame_time))
+            self.last_frame_time = now
+
+            # PIL로 변환 후 그리기
             frame_pil = Image.fromarray(frame_rgb)
+            draw = ImageDraw.Draw(frame_pil)
+            w, h = frame_pil.size
 
             # 추론 스레드 갱신
-            if not inference_thread.is_alive():
+            if not _infer_lock.locked():
+                global image_buffer
                 image_buffer = frame_pil.copy()
                 inference_thread = threading.Thread(target=run_interpreter)
                 inference_thread.start()
 
-            draw = ImageDraw.Draw(frame_pil)
-            w, h = frame_pil.size
-
             # 가이드선 표시
-            if show_guides:
-                draw_guides(draw, w, h)
+            draw_guides(draw, w, h)
 
-            # 탐지 결과 렌더링 + 방향 표기(테스트 스크립트 로직)
+            # 탐지 결과 렌더링 + 방향 표기
             with _infer_lock:
                 current = list(detected_objs)
 
@@ -174,35 +172,35 @@ def main():
                 # 하단 중앙 마커
                 r = 2
                 draw.ellipse([(x_bc - r, y_bc - r), (x_bc + r, y_bc + r)],
-                             outline="yellow", width=2)
+                              outline="yellow", width=2)
 
             # FPS/지연
             if SHOW_FPS:
                 draw.text((10, 10), f"{int(framerate):02d} fps\n{inference_latency*1000:.2f} ms",
                           fill="white")
-
             # === 표시 ===
-            # 요구사항: BGR<->RGB 변환 금지. 그린 결과(PIL→ndarray RGB)를 그대로 imshow.
             if SHOW_WINDOW:
-                vis_rgb = np.array(frame_rgb) # RGB 그대로
-                disp = cv2.resize(frame_rgb, (480, 640), interpolation=cv2.INTER_AREA)
+                vis_rgb = np.array(frame_pil)
+                disp = cv2.resize(vis_rgb, DISPLAY_SIZE, interpolation=cv2.INTER_AREA)
                 cv2.imshow(WINDOW_TITLE, disp)
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q'):
                     break
-                elif key == ord('g'):
-                    show_guides = not show_guides
 
-            # FPS 갱신
-            now = time.perf_counter()
-            framerate = 1.0 / max(1e-6, (now - last_frame_time))
-            last_frame_time = now
+        cv2.destroyAllWindows()
 
-    finally:
-        if inference_thread.is_alive():
-            inference_thread.join()
-        if SHOW_WINDOW:
-            cv2.destroyAllWindows()
+    def stop(self):
+        self.running = False
+        self.bus.unsubscribe(self.sub_id)
+
+# --------------------------------------------------------------------------
+# 메인 루프
+# --------------------------------------------------------------------------
+def main(bus: FrameBus):
+    app = MealApp(bus)
+    app.run()
 
 if __name__ == "__main__":
-    main()
+    from Common.frame_bus import FrameBus
+    bus = FrameBus()
+    main(bus)
