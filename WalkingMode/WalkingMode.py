@@ -1,23 +1,13 @@
 #!/usr/bin/env python3
-
 # -*- coding: utf-8 -*-
 
-
-
 import math, sys, threading, time
-
 from pathlib import Path
-
 import cv2, numpy as np
-
 from PIL import Image, ImageDraw
 
-
-
 from pycoral.adapters import common, detect
-
 from pycoral.utils.dataset import read_label_file
-
 from pycoral.utils.edgetpu import make_interpreter
 
 # --- 모드 전용 설정 ---
@@ -222,3 +212,4 @@ if __name__ == "__main__":
     bus = FrameBus()
 
     main(bus)
+
