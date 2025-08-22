@@ -6,7 +6,7 @@ MEAL_MODEL_PATH = "./model/food_effi_lite0_200ep_int8.tflite"
 MEAL_LABEL_PATH = "./model/labels.txt"
 
 # 추론 관련
-SCORE_THRESHOLD = 0.25        # 0.15~0.5 사이에서 필요하면 조절
+SCORE_THRESHOLD = 0.15        # 0.15~0.5 사이에서 필요하면 조절
 DEDUP_DISTANCE = 15           # 같은 클래스에서 중심 간격이 이 값 이하면 중복으로 간주
 
 # 화면/표시
