@@ -1,86 +1,73 @@
 # Common/img_processing.py
+
 import cv2
 import numpy as np
 import math
 from Common.config import CAMERA_ROTATE_CCW_90
 
 # =============================================================================
-# 거리 추정 (카메라 매개변수는 필요 시 수정)
+# 거리 추정기 (선형 외삽 기반)
 # =============================================================================
-CAMERA_HEIGHT_MM = 1700     # 카메라 높이(mm)
-CAMERA_TILT_DEG = 0         # 하향 각도(도)
-CAMERA_VFOV_DEG = 72.4      # 수직 화각(도)
-DEFAULT_FRAME_HEIGHT = 640  # 기본 프레임 높이(px)
-DEBUG = False
+# 하이퍼 파라미터 (보행 모드에 맞게 수정)
+CAMERA_HEIGHT_MM = 1700   # 카메라 높이 (mm)
+CAMERA_TILT_ANGLE = 25    # 카메라 설치 각도 (도)
+CAMERA_VFOV = 72.4        # 카메라 수직 화각 (도)
+DEFAULT_FRAME_HEIGHT = 640 # 이미지 높이 (픽셀)
+
+# class_id별 실제 높이 (mm)
+REAL_OBJECT_HEIGHTS = {
+    0: 1700, # person
+    1: 1000, # bicycle
+    2: 1500, # car
+    3: 1400, # motorcycle
+    5: 2500, # bus
+    7: 2000, # truck
+    9: 500,  # traffic light
+    "default": 1700
+}
 
 class DistanceEstimator:
-    def __init__(self, height_mm=CAMERA_HEIGHT_MM, tilt_deg=CAMERA_TILT_DEG,
-                 vfov_deg=CAMERA_VFOV_DEG, image_height=DEFAULT_FRAME_HEIGHT, debug=DEBUG):
-        self.height = float(height_mm)              # mm
-        self.tilt = float(tilt_deg)                 # deg (수평선 기준 아래 +)
-        self.vfov = float(vfov_deg)                 # deg (수직 FOV)
-        self.image_height = int(image_height)       # px
+    def __init__(self, height_mm=CAMERA_HEIGHT_MM, tilt_deg=CAMERA_TILT_ANGLE,
+                 vfov_deg=CAMERA_VFOV, image_height=DEFAULT_FRAME_HEIGHT, debug=False):
+        self.height = height_mm
+        self.tilt = tilt_deg
+        self.vfov = vfov_deg
+        self.image_height = image_height
         self.debug = debug
-        self.mapping = self._build_mapping()
+        
+        # 선형 외삽 기반 거리 매핑 테이블 생성
+        self.distance_mapping_table = self._create_distance_mapping_table()
+        
+    def _create_distance_mapping_table(self):
+        # 중앙-하단 2점 기반 선형 외삽
+        center_y = self.image_height // 2
+        center_angle = 90 - self.tilt
+        center_distance = self.height * math.tan(math.radians(center_angle))
 
-    def _build_mapping(self):
-        """
-        각도 선형 + tan 모델:
-          φ(y) = tilt + ((y - H/2)/H) * vfov * 2    (deg)
-          d_raw(y) = height / tan(φ(y))
-        """
-        H = self.height
-        img_h = float(self.image_height)
+        bottom_y = self.image_height
+        bottom_angle = (90 - self.tilt) - (self.vfov / 2)
+        bottom_distance = self.height * math.tan(math.radians(bottom_angle))
 
-        # y=0..img_h
-        y_coords = np.arange(0, self.image_height + 1, dtype=np.float32)
-        r = (y_coords - img_h/2.0) / img_h            # [-0.5, +0.5]
-        phi = self.tilt + (r * self.vfov) * 2.0       # deg
-
-        # 수치 안전장치 (0°/90° 근접 폭발 방지)
-        phi = np.clip(phi, 0.01, 89.9)
-        distances_raw_mm = H / np.tan(np.deg2rad(phi))  # mm
-
-        if self.debug:
-            phi_top = self.tilt - self.vfov/2.0
-            phi_bot = self.tilt + self.vfov/2.0
-            print(f"[DBG] φ_top={phi_top:.2f}°, φ_center={self.tilt:.2f}°, φ_bottom={phi_bot:.2f}°")
-
+        slope = (bottom_distance - center_distance) / (bottom_y - center_y)
+        intercept = center_distance - slope * center_y
+        
         return {
-            "y_coords": y_coords,
-            "phi_deg": phi,
-            "dist_raw_mm": distances_raw_mm,  # 보정 전
+            'y_pixels': np.linspace(0, self.image_height, self.image_height + 1),
+            'slope': slope,
+            'intercept': intercept,
         }
+        
+    def _calculate_distance_correction(self, raw_distance_m):
+        # 보정 계수 - 이 값은 실제 테스트를 통해 재조정해야 합니다.
+        CORRECTION_FACTOR = 0.88
+        return raw_distance_m * CORRECTION_FACTOR
 
-    def _apply_correction(self, raw_m: float) -> float:
+    def estimate_from_bbox(self, bbox, *, image_height=None) -> float:
         """
-        경험적 보정.
-        - 간단: 고정 배수(≈0.86 권장)
-        - 정밀: 표본으로 선형(a·raw + b) 피팅
+        바운딩 박스의 하단 Y좌표를 사용하여 거리를 추정 (mm 단위).
         """
-        USE_LINEAR = False
-        if not USE_LINEAR:
-            CORRECTION_FACTOR = 0.86
-            return raw_m * CORRECTION_FACTOR
-        # 예시: 표본 2.33→2.0, 3.67→3.0, 4.49→4.0 로 피팅한 값
-        a, b = 0.9083772569249747, -0.17629247504766127
-        return max(0.0, a * raw_m + b)
-
-    def estimate_from_pixel(self, y_pixel):
-        # 개별 y에 대해 즉시 계산 (매핑 테이블 없이도 동일 로직)
-        y = float(np.clip(y_pixel, 0, self.image_height))
-        H = self.height
-        img_h = float(self.image_height)
-        r = (y - img_h/2.0) / img_h
-        phi = self.tilt + (r * self.vfov) * 2.0
-        phi = float(np.clip(phi, 0.01, 89.9))
-
-        raw_m = (H / math.tan(math.radians(phi))) / 1000.0
-        corrected_m = self._apply_correction(raw_m)
-        return corrected_m  # m 단위
-
-    def estimate_from_bbox(self, bbox, *, image_height=None):
         if image_height and image_height != self.image_height:
+            # 해상도가 다를 경우 새로운 계산기 인스턴스 생성
             tmp = DistanceEstimator(
                 height_mm=self.height,
                 tilt_deg=self.tilt,
@@ -89,9 +76,25 @@ class DistanceEstimator:
                 debug=self.debug,
             )
             return tmp.estimate_from_bbox(bbox)
-        _, _, _, y2, *_ = bbox
-        return self.estimate_from_pixel(y2)
 
+        # bbox는 (x1, y1, x2, y2, cx, cy, class_id, class_name)
+        _, _, _, y2, *_ = bbox
+        foot_y = y2
+
+        mapping = self.distance_mapping_table
+        slope = mapping['slope']
+        intercept = mapping['intercept']
+
+        raw_distance_mm = slope * foot_y + intercept
+        raw_distance_m = raw_distance_mm / 1000.0
+
+        corrected_distance_m = self._calculate_distance_correction(raw_distance_m)
+        corrected_distance_mm = corrected_distance_m * 1000
+
+        # 현실적인 거리 범위로 제한 (보정 후)
+        corrected_distance_mm = max(100.0, min(corrected_distance_mm, 20000.0))
+        
+        return float(corrected_distance_mm)
 
 # =============================================================================
 # 영상 전처리 유틸
@@ -189,6 +192,7 @@ def detect_traffic_light_color(image_bgr, bbox, debug=False):
     if green_sum > red_sum * 1.5 and green_sum > PIX_MIN_G:
         return "GREEN"
     return "UNKNOWN"
+
 
 
 
