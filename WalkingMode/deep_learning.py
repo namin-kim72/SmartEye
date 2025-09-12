@@ -1,4 +1,7 @@
 # WalkingMode/deep_learning.py
+
+import serial
+import time
 import cv2
 from PIL import Image
 from pathlib import Path
@@ -8,7 +11,8 @@ from pycoral.adapters import common, detect
 from pycoral.utils.dataset import read_label_file
 
 from WalkingMode.config import (
-    WALKING_MODEL_PATH, WALKING_LABEL_PATH, TARGET_CLASS_IDS, CONF_THRESHOLD
+    WALKING_MODEL_PATH, WALKING_LABEL_PATH, TARGET_CLASS_IDS, CONF_THRESHOLD,
+    USE_LASER_SENSOR, LASER_SENSOR_PORT, LASER_SENSOR_BAUDRATE, LASER_MAX_DISTANCE_MM
 )
 
 class PersonDetector:
@@ -46,3 +50,32 @@ class PersonDetector:
             cx = int((x1 + x2) / 2); cy = int((y1 + y2) / 2)
             boxes.append((x1, y1, x2, y2, cx, cy, obj.id, self.labels.get(obj.id, str(obj.id))))
         return boxes
+
+class LaserDistanceSensor:
+    def __init__(self, port=LASER_SENSOR_PORT, baudrate=LASER_SENSOR_BAUDRATE):
+        self.ser = None
+        if USE_LASER_SENSOR:
+            try:
+                self.ser = serial.Serial(port, baudrate, timeout=1)
+                time.sleep(2)
+                print(f"[INFO] 레이저 센서 연결 성공: {port}")
+            except serial.SerialException as e:
+                print(f"[ERROR] 레이저 센서 연결 실패: {e}")
+                self.ser = None
+
+    def read_distance(self):
+        if self.ser and self.ser.in_waiting:
+            try:
+                line = self.ser.readline().decode('utf-8').strip()
+                if line.isdigit():
+                    distance_mm = int(line)
+                    if 0 < distance_mm <= LASER_MAX_DISTANCE_MM:
+                        return distance_mm
+            except (UnicodeDecodeError, ValueError) as e:
+                print(f"[ERROR] 레이저 센서 데이터 파싱 오류: {e}")
+        return None
+
+    def close(self):
+        if self.ser:
+            self.ser.close()
+            print("[INFO] 레이저 센서 연결 종료")
