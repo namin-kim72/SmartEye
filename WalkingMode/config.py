@@ -48,8 +48,5 @@ CAMERA_FPS = 30
 BOX_COLOR = (255, 0, 0)
 FONT_COLOR = (255, 255, 255)
 
-# 레이저 센서 관련 설정
-USE_LASER_SENSOR = True            # 레이저 센서 사용 여부
-LASER_SENSOR_PORT = '/dev/ttyS0'   # 레이저 센서가 연결된 시리얼 포트
-LASER_SENSOR_BAUDRATE = 9600      # 레이저 센서 통신 속도
-LASER_MAX_DISTANCE_MM = 1000      # 레이저 센서의 최대 유효 거리 (1m)
+# 각도 센서 관련 설정
+USE_ANGLE_SENSOR = True            # 각도 센서 사용 여부
