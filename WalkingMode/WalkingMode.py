@@ -9,21 +9,17 @@ from PIL import Image, ImageDraw
 from pycoral.adapters import common, detect
 from pycoral.utils.dataset import read_label_file
 from pycoral.utils.edgetpu import make_interpreter
-
-# --- 모드 전용 설정 ---
 from WalkingMode.config import (
-    SCORE_THRESHOLD, DEDUP_DISTANCE,
-    WINDOW_TITLE, SHOW_WINDOW, SHOW_FPS, FONT_COLOR, BOX_COLOR, DISPLAY_SIZE,
-    WALKING_MODEL_PATH, WALKING_LABEL_PATH, DANGER_THRESHOLDS, CONF_THRESHOLD
+    SCORE_THRESHOLD, DEDUP_DISTANCE, WINDOW_TITLE, SHOW_WINDOW, SHOW_FPS,
+    FONT_COLOR, BOX_COLOR, DISPLAY_SIZE, WALKING_MODEL_PATH, WALKING_LABEL_PATH,
+    DANGER_THRESHOLDS, CONF_THRESHOLD, USE_ANGLE_SENSOR
 )
-from WalkingMode.deep_learning import PersonDetector
+from WalkingMode.deep_learning import PersonDetector, PitchSensor
 from WalkingMode.risk import RiskLevel, RiskClassifier
 from WalkingMode.notifier import Notifier
-from Common.img_processing import DistanceEstimator, detect_traffic_light_color
-
-# --- 공용 캡처 ---
+from WalkingMode.walk_processing import DistanceEstimator, detect_traffic_light_color
 from Common.frame_bus import FrameBus
-
+from Common.utils import graceful_exit, speak
 # --------------------------------------------------------------------------
 # 모델/라벨 로드
 # --------------------------------------------------------------------------
@@ -36,51 +32,75 @@ interpreter.allocate_tensors()
 # WalkingApp
 # --------------------------------------------------------------------------
 class WalkingApp:
-    def __init__(self, bus: FrameBus):
+    def __init__(self, bus: FrameBus, button_mgr):
         self.bus = bus
         self.sub_id = bus.subscribe(queue_size=1)
         self.running = True
         self.last_frame_time = time.perf_counter()
-
+        
         self.detector = PersonDetector(conf=CONF_THRESHOLD)
         self.estimator = DistanceEstimator()
         self.classifier = RiskClassifier()
         self.notifier = Notifier()
-
+        self.pitch_sensor = PitchSensor() if USE_ANGLE_SENSOR else None
+        self.button_mgr = button_mgr
+        
     def run(self):
         q = self.bus.get_queue(self.sub_id)
+        
+        # 각도 센서 스레드 시작
+        if self.pitch_sensor:
+            self.pitch_sensor.start()
 
         while self.running:
+            # ---------------------------
+            # 버튼 이벤트 확인
+            # ---------------------------
+            event = self.button_mgr.get_event()
+            if event == "LONG_PRESS":
+                cv2.destroyAllWindows()
+                self.bus.unsubscribe(self.sub_id)
+                graceful_exit()
+            elif event == "SHORT_PRESS":
+                cv2.destroyAllWindows()
+                self.bus.unsubscribe(self.sub_id)
+                return  # 메인으로 복귀 → 다음 모드 실행
+                
             try:
-                frame_rgb = q.get(timeout=0.5)
-                if frame_rgb is None:
+                frame_bgr = q.get(timeout=0.5)
+                if frame_bgr is None:
                     break
             except queue.Empty:
                 continue
 
-            # FPS 갱신
             now = time.perf_counter()
             framerate = 1.0 / max(1e-6, (now - self.last_frame_time))
             self.last_frame_time = now
 
-            # OpenCV 색공간 일치 (RGB를 BGR로 변환)
-            # PersonDetector가 BGR 입력을 기대하므로 변환 필요
-            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-
-            # 객체 감지
             detections = self.detector.detect(frame_bgr)
-            
-            # 시각화 및 위험 판단은 BGR 프레임에서 수행
-            for (x1, y1, x2, y2, cx, cy, class_id, class_name) in detections:
-                if class_id == 9:  # traffic light
-                    color_name = detect_traffic_light_color(frame_bgr, (x1, y1, x2, y2, class_id, class_name))
+            current_tilt_angle = self.pitch_sensor.pitch_deg if self.pitch_sensor else None
+
+            if current_tilt_angle is not None:
+                print(f"Pitch Sensor Tilt: {current_tilt_angle:.2f} degrees")
+            else:
+                print("Pitch Sensor: No data")
+
+            for detection in detections:
+                x1, y1, x2, y2, cx, cy, class_id, class_name = detection
+                
+                if class_id == 9:
+                    color_name = detect_traffic_light_color(frame_bgr, detection)
                     color = (0, 255, 0) if color_name == "GREEN" else (0, 0, 255)
                     cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), color, 2)
                     cv2.putText(frame_bgr, f"{color_name}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
                     continue
 
-                dist_mm = self.estimator.estimate_from_bbox((x1, y1, x2, y2, class_id, class_name),
-                                                           image_height=frame_bgr.shape[0])
+                dist_mm = self.estimator.estimate_from_bbox(
+                    detection, 
+                    image_height=frame_bgr.shape[0], 
+                    tilt_deg=current_tilt_angle
+                )
+                
                 risk = self.classifier.classify(dist_mm, class_id=class_id)
                 self.notifier.notify(risk)
 
@@ -97,11 +117,9 @@ class WalkingApp:
                 cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), color, 2)
                 cv2.putText(frame_bgr, text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
-            # FPS 표시
             if SHOW_FPS:
                 cv2.putText(frame_bgr, f"{int(framerate):02d} fps", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-            # 디스플레이
             if SHOW_WINDOW:
                 disp = cv2.resize(frame_bgr, DISPLAY_SIZE, interpolation=cv2.INTER_AREA)
                 cv2.imshow(WINDOW_TITLE, disp)
@@ -113,12 +131,11 @@ class WalkingApp:
     def stop(self):
         self.running = False
         self.bus.unsubscribe(self.sub_id)
+        if self.pitch_sensor:
+            self.pitch_sensor.stop()
 
-# --------------------------------------------------------------------------
-# 메인 함수
-# --------------------------------------------------------------------------
-def main(bus: FrameBus):
-    app = WalkingApp(bus)
+def main(bus: FrameBus, button_mgr):
+    app = WalkingApp(bus, button_mgr)
     app.run()
 
 if __name__ == "__main__":
