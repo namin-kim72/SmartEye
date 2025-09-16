@@ -1,68 +1,62 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import sys, signal, threading, time, queue
-from typing import Optional
+import sys, signal, queue
+from google.cloud import texttospeech as tts
+import subprocess, os
 
-# 각 모듈 import
+from Common.config import GOOGLE_KEY_PATH
+from Common.button_manager import ButtonManager
+from Common.frame_bus import FrameBus
+from Common.capture import CameraManager
+
 from WalkingMode.WalkingMode import main as run_walk_mode
 from ReadMode.ReadMode import main as run_read_mode
 from MealMode.foodMode import main as run_food_mode
-from Common.frame_bus import FrameBus
-from Common.capture import CameraManager # CameraManager 클래스 import
+from Common.utils import graceful_exit, speak
 
-# ---- 그레이스풀 종료 처리 ----
-def graceful_exit(*_):
-    print("\n[MAIN] 종료")
-    # CameraManager가 종료되면 모든 자원이 정리됨
-    sys.exit(0)
+# -------------------------
+# 메인
+# -------------------------
 
-# ---- 모드 선택 함수 ----
-def choose(prompt: str, choices: list[str]) -> Optional[int]:
-    print(prompt)
-    for i, c in enumerate(choices, 1):
-        print(f"  {i}. {c}")
-    print("  q. 종료")
-    sel = input("선택: ").strip().lower()
-    if sel in ("q", "quit", "exit"):
-        return None
-    try:
-        val = int(sel)
-        if 1 <= val <= len(choices):
-            return val
-    except:
-        pass
-    print("[MAIN] 잘못된 선택")
-    return choose(prompt, choices)
-
-# ---- 메인 루프 ----
 def main():
     signal.signal(signal.SIGINT, graceful_exit)
     signal.signal(signal.SIGTERM, graceful_exit)
 
     MENU = ["보행모드", "읽기모드", "식사모드"]
-    
-    # 중앙 객체들 생성 (단 하나씩만)
+
     frame_bus = FrameBus()
     still_capture_queue = queue.Queue()
     camera_manager = CameraManager(frame_bus, still_capture_queue)
-    
-    # 카메라 캡처 스레드 시작
     camera_manager.start()
-    while True:
-        sel = choose("\n=== SmartEye 메인 ===", MENU)
-        if sel is None:
-            break
-        # 각 모드 함수에 bus와 camera_manager 전달
-        if sel == 1:
-            run_walk_mode(frame_bus)
-        elif sel == 2:
-            run_read_mode(frame_bus, camera_manager)
-        elif sel == 3:
-            run_food_mode(frame_bus)
 
-    # 프로그램 종료 시 카메라 매니저 종료
-    camera_manager.stop()
+    button_mgr = ButtonManager()
+
+    speak("스마트아이 전원이 켜졌습니다.")
+
+    mode_index = None
+
+    while True:
+        event = button_mgr.get_event(timeout=0.1)
+
+        if event == "LONG_PRESS":
+            graceful_exit()
+
+        elif event == "SHORT_PRESS":
+            if mode_index is None:
+                mode_index = 0
+            else:
+                mode_index = (mode_index + 1) % len(MENU)
+
+            speak(f"{MENU[mode_index]}가 켜졌습니다.")
+
+            if mode_index == 0:
+                run_walk_mode(frame_bus, button_mgr)
+            elif mode_index == 1:
+                run_read_mode(frame_bus, camera_manager, button_mgr)
+            elif mode_index == 2:
+                run_food_mode(frame_bus, button_mgr)
 
 if __name__ == "__main__":
     main()
+
